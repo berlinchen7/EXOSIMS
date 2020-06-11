@@ -277,6 +277,8 @@ class OpticalSystem(object):
         # loop through all science Instruments (must have one defined)
         assert scienceInstruments, "No science instrument defined."
         self.scienceInstruments = scienceInstruments
+#        print('========================')
+#        print(scienceInstruments)
         self._outspec['scienceInstruments'] = []
         for ninst, inst in enumerate(self.scienceInstruments):
             assert isinstance(inst, dict), "Science instruments must be defined as dicts."
@@ -311,7 +313,11 @@ class OpticalSystem(object):
                 self.vprint("Anomalous input, value set to default.")
                     
             # HRC transmission
-            if isinstance(inst['HRC'], basestring):
+            #print(inst)
+            if 'HRC' not in inst:
+                inst['HRC'] = HRC
+                self.vprint("Anomalous input, value set to default.")
+            elif isinstance(inst['HRC'], basestring):
                 pth = os.path.normpath(os.path.expandvars(inst['HRC']))
                 assert os.path.isfile(pth), "%s is not a valid file."%pth
                 dat = fits.open(pth)[0].data
@@ -330,12 +336,12 @@ class OpticalSystem(object):
                         "HRC transmission must be positive and smaller than 1."
                 inst['HRC'] = lambda l, HRC=float(inst['HRC']): np.array([HRC]*l.size,
                         ndmin=1)/u.photon
-            else:
-                inst['HRC'] = HRC
-                self.vprint("Anomalous input, value set to default.")
                     
             # FSS99-600 transmission
-            if isinstance(inst['FSS'], basestring):
+            if 'FSS' not in inst:
+                inst['FSS'] = FSS
+                self.vprint("Anomalous input, value set to default.")
+            elif isinstance(inst['FSS'], basestring):
                 pth = os.path.normpath(os.path.expandvars(inst['FSS']))
                 assert os.path.isfile(pth), "%s is not a valid file."%pth
                 dat = fits.open(pth)[0].data
@@ -354,12 +360,12 @@ class OpticalSystem(object):
                         "FSS transmission must be positive and smaller than 1."
                 inst['FSS'] = lambda l, FSS=float(inst['FSS']): np.array([FSS]*l.size,
                         ndmin=1)/u.photon
-            else:
-                inst['FSS'] = FSS
-                self.vprint("Anomalous input, value set to default.")
             
             # Aluminum transmission
-            if isinstance(inst['Al'], basestring):
+            if 'Al' not in inst:
+                inst['Al'] = Al
+                self.vprint("Anomalous input, value set to default.")
+            elif isinstance(inst['Al'], basestring):
                 pth = os.path.normpath(os.path.expandvars(inst['Al']))
                 assert os.path.isfile(pth), "%s is not a valid file."%pth
                 dat = fits.open(pth)[0].data
@@ -378,9 +384,6 @@ class OpticalSystem(object):
                         "Al transmission must be positive and smaller than 1."
                 inst['Al'] = lambda l, Al=float(inst['Al']): np.array([Al]*l.size,
                         ndmin=1)/u.photon
-            else:
-                inst['Al'] = Al
-                self.vprint("Anomalous input, value set to default.")
             
             # load detector specifications
             inst['optics'] = float(inst.get('optics', optics))  # attenuation due to optics
