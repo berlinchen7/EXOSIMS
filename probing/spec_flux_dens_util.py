@@ -14,7 +14,7 @@ def starMag(Vmag, BV, lam):
     mV = Vmag + b*BV*(1./lam_um - 1.818)
     return mV
 
-def calc_F0_Traubetal(Vmag, BV, lam):
+def calc_Fm_Traubetal(Vmag, BV, lam):
     return (1e4*10**(4.01 - (lam/u.nm - 550)/770)*u.ph/u.s/u.m**2/u.nm) *\
             10**(-0.4 * starMag(Vmag, BV, lam))
 
@@ -43,18 +43,17 @@ def scale_spec_by_Traubetal(sdat, Vmag, BV):
     bw_450, bw_700, bw_900 = 0.2, 0.15, 0.1 # \Delta\lambda \approx 100 nm
 
     # Compute correction factors:
-    C_450 = calc_F0_Traubetal(Vmag, BV, 450*u.nm) / calc_F0_Riemann(sdat, 450*u.nm, bw_450)
-    C_700 = calc_F0_Traubetal(Vmag, BV, 700*u.nm) / calc_F0_Riemann(sdat, 700*u.nm, bw_450)
-    C_900 = calc_F0_Traubetal(Vmag, BV, 900*u.nm) / calc_F0_Riemann(sdat, 900*u.nm, bw_450)
+    C_450 = calc_Fm_Traubetal(Vmag, BV, 450*u.nm) / calc_F0_Riemann(sdat, 450*u.nm, bw_450)
+    C_700 = calc_Fm_Traubetal(Vmag, BV, 700*u.nm) / calc_F0_Riemann(sdat, 700*u.nm, bw_450)
+    C_900 = calc_Fm_Traubetal(Vmag, BV, 900*u.nm) / calc_F0_Riemann(sdat, 900*u.nm, bw_450)
     
     # Dilate FLUX by the average of the 3 factors:
     C = np.mean([C_450, C_700, C_900])
     sdat.FLUX = sdat.FLUX * C
     
     return sdat
-    
-def calc_F0(lam, BW, Vmag, BV, spec = None):
-
+  
+def find_specmatch(spec, specData=False): # if specData, fetch/return the spectrum data as well
     indexf =  pkg_resources.resource_filename('EXOSIMS.TargetList','pickles_index.pkl')
     assert os.path.exists(indexf), "Pickles catalog index file not found in TargetList directory."
     datapath = pkg_resources.resource_filename('EXOSIMS.TargetList','dat_uvk')
@@ -92,7 +91,7 @@ def calc_F0(lam, BW, Vmag, BV, spec = None):
 
 
     if spec is not None:
-        # Try to decmompose the input spectral type
+        # Try to decompose the input spectral type
         tmp = specregex1.match(spec)
         if not(tmp):
             tmp = specregex2.match(spec)
@@ -125,13 +124,24 @@ def calc_F0(lam, BW, Vmag, BV, spec = None):
         specmatch = None
 
     if specmatch == None:
-        F0 = calc_F0_Traubetal(Vmag, BV, lam)
+        if specData:
+            return None, None
+        else:
+            return None
     else:
-        # Open corresponding spectrum
-        with fits.open(os.path.join(specdatapath, specindex[specmatch])) as hdulist:
-            sdat = hdulist[1].data
-
-        sdat = scale_spec_by_Traubetal(sdat, Vmag, BV)          
-        F0 = calc_F0_Riemann(sdat, lam, BW)
+        if specData:
+            # Open corresponding spectrum
+            with fits.open(os.path.join(specdatapath, specindex[specmatch])) as hdulist:
+                sdat = hdulist[1].data
+            return specmatch, sdat
+        else:
+            return specmatch
     
-    return F0
+def calc_Fm(lam, BW, Vmag, BV, spec = None):
+    specmatch, sdat = find_specmatch(spec, specData=True)
+    if specmatch == None:
+        Fm = calc_Fm_Traubetal(Vmag, BV, lam)
+    else:
+        sdat = scale_spec_by_Traubetal(sdat, Vmag, BV)          
+        Fm = calc_F0_Riemann(sdat, lam, BW)
+    return Fm
