@@ -236,7 +236,7 @@ class OpticalSystem(object):
             IWA=None, OWA=None, ref_dMag=3, ref_Time=0, stabilityFact=1, 
             k_samp=0.25, kRN=75.0, CTE_derate=1.0, dark_derate=1.0, refl_derate=1.0, 
             Nlensl=5, lam_d=500, lam_c=500, MUF_thruput=0.91,   
-            HRC=1, FSS=1, Al=1, cachedir=None, ContrastScenario="CGDesignPerf",  
+            cachedir=None, ContrastScenario="CGDesignPerf",  
             koAngles_Sun=[0,180], koAngles_Earth=[0,180], koAngles_Moon=[0,180], koAngles_Small=[0,180],
             use_char_minintTime=False, binaryleakfilepath=None, texp_flag=False, **specs):
 
@@ -292,7 +292,18 @@ class OpticalSystem(object):
             if isinstance(inst['QE'], basestring):
                 pth = os.path.normpath(os.path.expandvars(inst['QE']))
                 assert os.path.isfile(pth), "%s is not a valid file."%pth
-                dat = fits.open(pth)[0].data
+                # Check csv vs fits
+                ext = pth.split('.')[-1]
+                assert ext == 'fits' or ext == 'csv', f'{pth} must be a fits or csv file.'
+                if ext == 'fits':
+                    dat = fits.open(pth)[0].data
+                else:
+                    # Need to get all of the headers and data, then associate them in the same
+                    # ndarray that the fits files would generate
+                    table_vals = np.genfromtxt(pth, delimiter=',', skip_header=1)
+                    table_headers = np.genfromtxt(pth, delimiter=',', skip_footer=len(table_vals), dtype=str)
+                    # Create array that mimics the fits file format
+                    dat = np.vstack([table_vals[:,0],table_vals[:,1]]).T
                 assert len(dat.shape) == 2 and 2 in dat.shape, \
                         param_name + " wrong data shape."
                 lam, D = (dat[0], dat[1]) if dat.shape[0] == 2 else (dat[:,0], dat[:,1])
@@ -312,79 +323,6 @@ class OpticalSystem(object):
                 inst['QE'] = QE
                 self.vprint("Anomalous input, value set to default.")
                     
-            # HRC transmission
-            #print(inst)
-            if 'HRC' not in inst:
-                inst['HRC'] = HRC
-                self.vprint("Anomalous input, value set to default.")
-            elif isinstance(inst['HRC'], basestring):
-                pth = os.path.normpath(os.path.expandvars(inst['HRC']))
-                assert os.path.isfile(pth), "%s is not a valid file."%pth
-                dat = fits.open(pth)[0].data
-                assert len(dat.shape) == 2 and 2 in dat.shape, \
-                        param_name + " wrong data shape."
-                lam, D = (dat[0], dat[1]) if dat.shape[0] == 2 else (dat[:,0], dat[:,1])
-                assert np.all(D >= 0) and np.all(D <= 1), \
-                        "HRC transmission must be positive and smaller than 1."
-                # parameter values outside of lam
-                Dinterp2 = scipy.interpolate.interp1d(lam.astype(float), D.astype(float),
-                        kind='cubic', fill_value=0., bounds_error=False)
-                inst['HRC'] = lambda l: np.array(Dinterp2(l.to('nm').value), 
-                        ndmin=1)/u.photon
-            elif isinstance(inst['HRC'], numbers.Number):
-                assert inst['HRC'] >= 0 and inst['HRC'] <= 1, \
-                        "HRC transmission must be positive and smaller than 1."
-                inst['HRC'] = lambda l, HRC=float(inst['HRC']): np.array([HRC]*l.size,
-                        ndmin=1)/u.photon
-                    
-            # FSS99-600 transmission
-            if 'FSS' not in inst:
-                inst['FSS'] = FSS
-                self.vprint("Anomalous input, value set to default.")
-            elif isinstance(inst['FSS'], basestring):
-                pth = os.path.normpath(os.path.expandvars(inst['FSS']))
-                assert os.path.isfile(pth), "%s is not a valid file."%pth
-                dat = fits.open(pth)[0].data
-                assert len(dat.shape) == 2 and 2 in dat.shape, \
-                        param_name + " wrong data shape."
-                lam, D = (dat[0], dat[1]) if dat.shape[0] == 2 else (dat[:,0], dat[:,1])
-                assert np.all(D >= 0) and np.all(D <= 1), \
-                        "FSS transmission must be positive and smaller than 1."
-                # parameter values outside of lam
-                Dinterp3 = scipy.interpolate.interp1d(lam.astype(float), D.astype(float),
-                        kind='cubic', fill_value=0., bounds_error=False)
-                inst['FSS'] = lambda l: np.array(Dinterp3(l.to('nm').value), 
-                        ndmin=1)/u.photon
-            elif isinstance(inst['FSS'], numbers.Number):
-                assert inst['FSS'] >= 0 and inst['FSS'] <= 1, \
-                        "FSS transmission must be positive and smaller than 1."
-                inst['FSS'] = lambda l, FSS=float(inst['FSS']): np.array([FSS]*l.size,
-                        ndmin=1)/u.photon
-            
-            # Aluminum transmission
-            if 'Al' not in inst:
-                inst['Al'] = Al
-                self.vprint("Anomalous input, value set to default.")
-            elif isinstance(inst['Al'], basestring):
-                pth = os.path.normpath(os.path.expandvars(inst['Al']))
-                assert os.path.isfile(pth), "%s is not a valid file."%pth
-                dat = fits.open(pth)[0].data
-                assert len(dat.shape) == 2 and 2 in dat.shape, \
-                        param_name + " wrong data shape."
-                lam, D = (dat[0], dat[1]) if dat.shape[0] == 2 else (dat[:,0], dat[:,1])
-                assert np.all(D >= 0) and np.all(D <= 1), \
-                        "Al transmission must be positive and smaller than 1."
-                # parameter values outside of lam
-                Dinterp4 = scipy.interpolate.interp1d(lam.astype(float), D.astype(float),
-                        kind='cubic', fill_value=0., bounds_error=False)
-                inst['Al'] = lambda l: np.array(Dinterp4(l.to('nm').value), 
-                        ndmin=1)/u.photon
-            elif isinstance(inst['Al'], numbers.Number):
-                assert inst['Al'] >= 0 and inst['Al'] <= 1, \
-                        "Al transmission must be positive and smaller than 1."
-                inst['Al'] = lambda l, Al=float(inst['Al']): np.array([Al]*l.size,
-                        ndmin=1)/u.photon
-            
             # load detector specifications
             inst['optics'] = float(inst.get('optics', optics))  # attenuation due to optics
             inst['FoV'] = float(inst.get('FoV', FoV))*u.arcsec  # field of view
@@ -425,7 +363,7 @@ class OpticalSystem(object):
             
             # populate detector specifications to outspec
             for att in inst:
-                if att not in ['QE', 'HRC', 'FSS', 'Al']:
+                if att not in ['QE']:
                     dat = inst[att]
                     self._outspec['scienceInstruments'][ninst][att] = dat.value \
                             if isinstance(dat, u.Quantity) else dat
