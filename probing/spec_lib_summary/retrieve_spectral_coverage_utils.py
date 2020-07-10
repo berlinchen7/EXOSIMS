@@ -6,8 +6,6 @@ def get_all_files_given_ext(dir_path, ext):
     import glob
     return glob.glob(dir_path +'/**/*.' + ext, recursive=True)
 
-# print(get_all_files_given_ext('/Users/berlinc/Downloads/calstar_templates', 'fits'))
-
 def get_min_max_wavelength_from_tem_dlv(file):
     f = open(file, 'r')
     # Get rid of empty lines:
@@ -30,10 +28,61 @@ def get_min_max_wavelength_from_tem_dlv(file):
     
     return min_wv, max_wv
 
+def get_spectra_from_tem_dlv(file):
+    f = open(file, 'r')
+    # Get rid of empty lines:
+    lines = [line for line in f.readlines() if line.strip()]
+    f.close()
+    data = lines
+    for i, l in enumerate(lines):
+        # Spacing differs from file to file, as well as capitalization of W
+        if l.replace(' ', '').upper() == '(microns)(W/cm2/um)(W/cm2/um)(%)(%)\n'.upper():
+            data = lines[i+2:]
+            break
+    if len(data) == len(lines):
+        print('Error with parsing ' + file)
+        return None
+    
+    wavelength, irrad = [], []
+    for d in data:
+        wavelength.append(float(d.split()[0]))
+        irrad.append(float(d.split()[1]))
+    return wavelength, irrad
+    
+def get_spectra_from_ascii(file):
+    f = open(file, 'r')
+    # Get rid of empty lines:
+    lines = [line for line in f.readlines() if line.strip()]
+    f.close()
+    
+    wavelength, irrad = [], []
+    for l in lines:
+        entry = l.split()
+        if len(entry) == 3: # for some reason the file engelke/KF08T3.dat 
+                            #  has weird values such as '-' at the beginning of a line or
+                            #  a missing decimal point, e.g., '1 48391' (supposed to be '1.48391')
+            try:
+                int(entry[0])
+                entry[0] = entry[0] + '.' + entry[1]
+                entry[1] = entry[2]
+                entry = entry[:2]
+            except:
+                entry = entry[1:]                
+        
+        try: # for some reason the file engelke/KF08T3.dat has messed up wavelengths such as 2.322.7
+            w = float(entry[0])
+        except:
+            print('Faulty wavelength: ' + entry[0] + ' in ' + file + '.')
+            continue
+        wavelength.append(w)
+        irrad.append(float(entry[1]))
+
+    return wavelength, irrad
+    
 def make_spec_type_csv_cohen_cw_spectra(calstar_tem_path):
     files = get_all_files_given_ext(calstar_tem_path + '/cohen', 'tem')
     files += get_all_files_given_ext(calstar_tem_path + '/cohen', 'dlv')
-    files += get_all_files_given_ext(calstar_tem_path + '/cw_Spectra', 'tem')
+    files += get_all_files_given_ext(calstar_tem_path + '/cw_spectra', 'tem')
 
     Name, Spec = [], []
     for file in files:
@@ -70,7 +119,7 @@ def make_spec_type_csv_cohen_cw_spectra(calstar_tem_path):
     df = pd.DataFrame(csv_input)
     df.to_csv('cohen_cw_spectra_spec_sup.csv', index=False)
             
-
+            
 def standerize_spec_type(spec):
     if len(spec) == 0:
 #         print('spectral type ' + spec + ' cannot be standerized.')
