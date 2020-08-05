@@ -45,6 +45,10 @@ def get_spectra_from_tem_dlv(file):
     
     wavelength, irrad = [], []
     for d in data:
+        curr_wave = float(d.split()[0])
+        # Get rid of duplicate wavelengths
+        if len(wavelength) > 0 and curr_wave == wavelength[-1]: 
+            continue
         wavelength.append(float(d.split()[0]))
         irrad.append(float(d.split()[1]))
     return wavelength, irrad
@@ -79,6 +83,18 @@ def get_spectra_from_ascii(file):
 
     return wavelength, irrad
     
+import pysynphot as psp
+from astropy import units as u
+import numpy as np
+
+def renormalize_spectra(wavelength, flux, band='johnson,k'):
+    # Convert to flam and nm
+    flux = flux.to(u.erg / u.cm**2 / u.s / u.AA, equivalencies=u.spectral())
+    wavelength = wavelength.to(u.nm)
+    sp = psp.spectrum.ArraySourceSpectrum(wavelength.value, flux.value, waveunits='Nm', fluxunits='Flam')
+    sp_norm = sp.renorm(0, 'vegamag', psp.ObsBandpass(band))
+    return sp_norm.wave * u.nm, sp_norm.flux * u.erg / u.cm**2 / u.s / u.AA
+
 def make_spec_type_csv_cohen_cw_spectra(calstar_tem_path):
     files = get_all_files_given_ext(calstar_tem_path + '/cohen', 'tem')
     files += get_all_files_given_ext(calstar_tem_path + '/cohen', 'dlv')

@@ -4,17 +4,12 @@ import numpy as np
 import pandas as pd
 import os
 from astropy.io import fits
+import pickle, os
 
 
-def load_spec_type_map_from_csv():
-    ''' Loading cached data as a dictionary object (SUP_DICT)'''
-
-    SUP_DICT = {}
-
-
-    # data of curr_calspec_sup.csv pulled from:
-    # - https://www.stsci.edu/hst/instrumentation/reference-data-for-calibration-and-tools/astronomical-catalogs/calspec
-    df = pd.read_csv('curr_calspec_sup.csv')
+def update_spec_type_dict_from_csv(csv_name, SUP_DICT):
+    '''Helper for load_spec_type_map_from_csv.'''
+    df = pd.read_csv(csv_name)
     tmp = df.set_index('Name').T.to_dict('list')
     # tmp is now {'star name': ['spec type with weird "\xao" characters'], ...}
     for key in tmp:
@@ -24,20 +19,49 @@ def load_spec_type_map_from_csv():
     for key in tmp:
         SUP_DICT_tmp[key.upper()] = tmp[key]
     SUP_DICT.update(SUP_DICT_tmp.copy())
+    hist = []
+    names = df['Name']
+    for n in names:
+        if n in hist:
+            print(n)
+        else:
+            hist.append(n)
+    return SUP_DICT
 
+def load_spec_type_map_from_csv():
+    ''' Loading cached data as a dictionary object (SUP_DICT)'''
+
+    SUP_DICT = {}
+
+
+    # data of curr_calspec_sup.csv pulled from:
+    # - https://www.stsci.edu/hst/instrumentation/reference-data-for-calibration-and-tools/astronomical-catalogs/calspec
+    SUP_DICT = update_spec_type_dict_from_csv('curr_calspec_sup.csv', SUP_DICT)
 
     # data of cohen_cw_spectra_spec_sup.csv scrapped from tem/dvl files in 'cohen' and 'cw_spectra'.
     # - see retrieve_spectral_coverage_utils.make_spec_type_csv_cohen_cw_spectra()
-    df = pd.read_csv('cohen_cw_spectra_spec_sup.csv')
-    tmp = df.set_index('Name').T.to_dict('list')
-    for key in tmp:
-        tmp[key] = tmp[key][0]
-        tmp[key] = tmp[key].replace(u'\\xa0', u' ').strip()
-    SUP_DICT_tmp = {}
-    for key in tmp:
-        SUP_DICT_tmp[key.upper()] = tmp[key]
-    SUP_DICT.update(SUP_DICT_tmp.copy())
+    SUP_DICT = update_spec_type_dict_from_csv('cohen_cw_spectra_spec_sup.csv', SUP_DICT)
+
+    # data of curr_calspec_sup.csv pulled from:
+    # - https://www.stsci.edu/hst/instrumentation/reference-data-for-calibration-and-tools/astronomical-catalogs/calspec
+    SUP_DICT = update_spec_type_dict_from_csv('curr_calspec_sup.csv', SUP_DICT)
+
+    # data of curr_calspec_sup.csv pulled from:
+    # - https://www.stsci.edu/hst/instrumentation/reference-data-for-calibration-and-tools/astronomical-catalogs/castelli-and-kurucz-atlas
+    # Note: ckp00_39000[g40] and ckp00_34000[g40] correspond to multiple associated spectral types (O6.5V/O6I and 
+    #  O8.5V/O8I, respectively); for convenience, I deleted the O6V and O8.5V ones as other models have
+    #  the same spectral type after standardization.
+    SUP_DICT = update_spec_type_dict_from_csv('ck_spec_types.csv', SUP_DICT)
  
+    # Load Pickle's index data:
+    pickles_indexf= '../../EXOSIMS/TargetList/pickles_index.pkl'
+    with open(pickles_indexf, 'rb') as handle:
+        specindex = pickle.load(handle)
+    for spec in specindex.keys():
+        if spec == 'M10III': # Somehow pickles has 'M10III', which is not needed.
+            continue
+        SUP_DICT[specindex[spec]] = spec
+
     return SUP_DICT
     
     
@@ -47,15 +71,8 @@ def find_spec_type_given_name(name, SUP_DICT):
     if name in list(SUP_DICT.keys()):
         return SUP_DICT[name]
     
-    print('Cannot find ' + name + ' in cached csv files. Resorting to Simbad.')
-    customSimbad = Simbad()
-    customSimbad.add_votable_fields('sptype')
-    try:
-        result = customSimbad.query_object(name)
-        return result['SP_TYPE'][0].decode("utf-8")
-    except:
-        print(name + ' not found.')
-        return None
+    
+    return None # Cannot find 'name' in cached csv files. Returning None.
 
 def find_spec_types_given_names(names, SUP_DICT):
     
@@ -68,16 +85,9 @@ def find_spec_types_given_names(names, SUP_DICT):
         specs[i] = find_spec_type_given_name(names[i], SUP_DICT)
 
     if len(names[~cache_mask]) != 0:
-        print('Some spectral types cannot be found in the cached csv files. Resorting to Simbad for those.')
-        customSimbad = Simbad()
-        customSimbad.add_votable_fields('sptype')
-        result = customSimbad.query_objects(names[~cache_mask])
-        result = [s.decode("utf-8") for s in result['SP_TYPE']]
-        result = np.array(result)
-        if result.shape[0] != names[~cache_mask].shape[0]:
-            print('There exists name that cannot be found even with Simbad. Returning None.')
-            return None
-        specs[~cache_mask] = result
+        print('WARNING: There exists names whose corresponding spectral types cannot be found.')
+        specs[~cache_indices] = None
+
     return specs
 
 def getSpCov_engelke():
@@ -92,6 +102,7 @@ def getSpCov_irs_cal():
 def getSpCov_calspec(dir_path):
     # Based on https://www.stsci.edu/hst/instrumentation/reference-data-for-calibration-and-tools/astronomical-catalogs/calspec
     spec_cov = {}
+    spec_map = load_spec_type_map_from_csv()
     for file in get_all_files_given_ext(dir_path, 'fits'):
  
         name = os.path.basename(file)
@@ -102,8 +113,7 @@ def getSpCov_calspec(dir_path):
             if name.find(e) != -1:
                 name = name[:name.find(e)]
                 break # break here necessary
-        
-        spec_map = load_spec_type_map_from_csv()
+
         spec = find_spec_type_given_name(name.upper(), spec_map)
         spec = standerize_spec_type(spec)
         if spec == None:
@@ -177,7 +187,68 @@ def getSpCov_cw_spectra(dir_path):
             spec_cov[spec] = (min_wv, max_wv)
     return spec_cov
 
+def getSpCov_ck04models(dir_path):
+    spec_cov = {}
+    spec_map = load_spec_type_map_from_csv()
+    files = get_all_files_given_ext(dir_path, 'fits')
+    for file in files:
+        name = os.path.basename(file)
+        name = name[:-5] # Get rid of '.fits'
+        
+        g, spec = None, None
+        for i in range(0, 51, 5):
+            curr_spec = find_spec_type_given_name(name.upper() + "[G{:02d}]".format(i), spec_map)
+            if curr_spec != None:
+                g = "g{:02d}".format(i)
+                spec = curr_spec
+                break
+                
+        # In case when the model does not correspond to a spectral type:
+        if spec == None:
+            continue
+            
+        spec = standerize_spec_type(spec)
 
+        with fits.open(file) as hdulist:
+                sdat = hdulist[1].data
+        min_wv, max_wv = sdat.WAVELENGTH[0], sdat.WAVELENGTH[-1]
+        min_wv, max_wv = min_wv/10, max_wv/10 # Convert from Angstrom to nm
+        if spec in spec_cov:
+            if max_wv > spec_cov[spec][1]:
+                spec_cov[spec] = (min_wv, max_wv)
+        else:
+            spec_cov[spec] = (min_wv, max_wv)
+    return spec_cov
+
+def getSpCov_pickles(indexf='../../EXOSIMS/TargetList/pickles_index.pkl'):
+    with open(indexf, 'rb') as handle: 
+        specindex = pickle.load(handle)
+    ret = {}
+    for spec_type in specindex.keys(): # Note spec_type is already in standardized format, so no need to standardize
+        if spec_type == 'M10III': # Somehow pickles has 'M10III', which is not needed
+            continue
+        fitsfile = specindex[spec_type]
+        fitsfile = os.path.dirname(indexf) + '/dat_uvk/' + fitsfile
+        with fits.open(fitsfile) as hdulist:
+                sdat = hdulist[1].data
+        min_wv, max_wv = sdat.WAVELENGTH[0], sdat.WAVELENGTH[-1]
+        min_wv, max_wv = min_wv/10, max_wv/10 # Convert from Angstrom to nm
+        ret[spec_type] = (min_wv, max_wv)
+    return ret
+
+
+def getSpCov_bpgs(fdir='./bpgs'):
+    ret = {}
+    files = get_all_files_given_ext(fdir, 'fits')
+    for f in files:
+        with fits.open(f) as hdulist:
+            header = hdulist[0].header
+        sptype = header['MKTYPE']
+        if sptype == '' or sptype == 'N': # Not sure what spectral type 'N' is, so skip
+            continue
+        ret[standerize_spec_type(sptype)] = (229, 2560)
+    return ret
+        
 def retrieve_files_from_spec_type(spec, calstar_path):
     '''Exhaustively search through calstar_templates for template files corresponding
         to the given spectral type.'''
@@ -240,6 +311,7 @@ def retrieve_files_from_spec_type(spec, calstar_path):
             curr_calspec_map[curr_spec].append(file)
         else:
             curr_calspec_map[curr_spec] = [file]
+    
     
     for key in engelke_map.keys():
         if standerize_spec_type(key) == spec:
