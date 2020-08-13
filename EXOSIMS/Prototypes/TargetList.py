@@ -159,16 +159,25 @@ class TargetList(object):
         # Paths
         indexf =  pkg_resources.resource_filename('EXOSIMS.TargetList','pickles_index.pkl')
         assert os.path.exists(indexf), "Pickles catalog index file not found in TargetList directory."
+        ck_indexf = pkg_resources.resource_filename('EXOSIMS.TargetList','ck_index.pkl')
+        assert os.path.exists(ck_indexf), "Castelli and Kurucz 2004 atlas index file not found in TargetList directory."
 
         datapath = pkg_resources.resource_filename('EXOSIMS.TargetList','dat_uvk')
         assert os.path.isdir(datapath), 'Could not locate %s in TargetList directory.' %(datapath)
+        ck_datapath = pkg_resources.resource_filename('EXOSIMS.TargetList','ckp00')
+        assert os.path.isdir(ck_datapath), 'Could not locate %s in TargetList directory.' %(ck_datapath)
 
         # grab Pickles Atlas index
         with open(indexf, 'rb') as handle:
             self.specindex = pickle.load(handle)
+        # grab Castelli and Kurucz 2004 Atlas index
+        with open(ck_indexf, 'rb') as handle:
+            self.ck_specindex = pickle.load(handle) 
 
         self.speclist = sorted(self.specindex.keys())
         self.specdatapath = datapath
+        self.ck_speclist = sorted(self.ck_specindex.keys())
+        self.ck_specdatapath = ck_datapath
 
         #spectral type decomposition
         #default string: Letter|number|roman numeral
@@ -184,14 +193,21 @@ class TargetList(object):
         self.specregex4 = re.compile(r'([OBAFGKMLTY])')
 
         self.romandict = {'I':1,'II':2,'III':3,'IV':4,'V':5}
+        self.rev_romandict = dict([reversed(i) for i in self.romandict.items()])
         self.specdict = {'O':0,'B':1,'A':2,'F':3,'G':4,'K':5,'M':6}
 
-        #everything in speclist is correct, so only need first regexp
+        #everything in speclist and ck_speclist is correct, so only need first regexp
         specliste = []
         for spec in self.speclist:
             specliste.append(self.specregex1.match(spec).groups())
         self.specliste = np.vstack(specliste)
         self.spectypenum = np.array([self.specdict[l] for l in self.specliste[:,0]])*10+ np.array(self.specliste[:,1]).astype(float)
+
+        ck_specliste = []
+        for ck_spec in self.ck_speclist:
+            ck_specliste.append(self.specregex1.match(ck_spec).groups())
+        self.ck_specliste = np.vstack(ck_specliste)
+        self.ck_spectypenum = np.array([self.specdict[l] for l in self.ck_specliste[:,0]])*10+ np.array(self.ck_specliste[:,1]).astype(float)
 
         # Create F0 dictionary for storing mode-associated F0s
         self.F0dict = {}
@@ -398,10 +414,13 @@ class TargetList(object):
         magnitude in a given bandpass for a given spectral type.
         Assumes the Pickles Atlas is saved to TargetList:
             ftp://ftp.stsci.edu/cdbs/grid/pickles/dat_uvk/
+        as well as the Castelli and Kurucz 2004 Atlas (CK):
+            archive.stsci.edu/hlsps/reference-atlases/cdbs/grid/ck04models/ckp00/
 
         If spectral type is provided, tries to match based on luminosity class,
-        then spectral type. If no type, or no match, tries to match based on
-        effective temperature. If neither Teff or SpT given, defaults to fit
+        then spectral type. Match to CK if the bandpass exceeds 2.5 microns;
+        otherwise match to the Pickles Atlas. If no type, or no match, tries to 
+        match based on effective temperature. If neither Teff or SpT given, defaults to fit
         based on Traub et al. 2016 (JATIS), which gives spectral flux density
         of ~9.5e7 [ph/s/m2/nm] @ 500nm
 
@@ -447,6 +466,13 @@ class TargetList(object):
         print('Reference mag for star #', sInd, ' is ', refMag, ' in band ',
               refLam)
 
+        # Construct renormalization function
+        def renorm_V0(f):
+            vband = np.arange(3600, 5300, 5)  # bandpass to normalize over
+            Fv0 = (3.55*10**-9)*u.erg/u.s/u.cm**2/u.AA  # 0 mag flux in V
+            norm = Fv0/np.sum(f[[vband]])  # normalization constant
+            return f*norm  # normalized blackbody flux over lams
+
         # Now match spectral type
         if spec is not None:
             # Try to decmompose the input spectral type
@@ -470,14 +496,38 @@ class TargetList(object):
                         spece = None
 
             # Now match to the atlas
-            if spece is not None:
-                lumclass = self.specliste[:, 2] == spece[2]
-                ind = np.argmin(np.abs(self.spectypenum[lumclass]
-                                       - (self.specdict[spece[0]]*10+spece[1]))
-                                )
-                specmatch = ''.join(self.specliste[lumclass][ind])
+            # Set useCK to True when the bandpass exceeds 2.5 microns 
+            # (which is the max wavelength supported by the Pickles atlas)
+            lmax = lam*(1+BW/2)
+            lmin = lam*(1-BW/2)
+            if lmax > 25000*u.AA or lmin > 25000*u.AA:
+                useCK = True
             else:
-                specmatch = None
+                useCK = False
+
+            if not useCK:
+                if spece is not None:
+                    lumclass = self.specliste[:, 2] == spece[2]
+                    ind = np.argmin(np.abs(self.spectypenum[lumclass]
+                                           - (self.specdict[spece[0]]*10+spece[1]))
+                                    )
+                    specmatch = ''.join(self.specliste[lumclass][ind])
+                else:
+                    specmatch = None
+            else: # use Castelli and Kurucz 2004 (CK) Atlas
+                if spece is not None:
+                    # CK's README only indicated suggested templates for odd lum classes;
+                    #  hence, assuming subgiants are giants and bright giants are supergiants
+                    lumclasse = self.romandict[spece[2]] if self.romandict[spece[2]]%2 == 1\
+                                                   else self.romandict[spece[2]] - 1
+                    lumclasse = self.rev_romandict[lumclasse]
+                    assert lumclasse in ['I', 'III', 'V']
+                    lumclass = ck_specliste[:,2] == lumclasse
+                    ind = np.argmin(np.abs(self.ck_spectypenum[lumclass] 
+                                           - (self.specdict[spece[0]]*10+spece[1])))
+                    specmatch = ''.join(self.ck_specliste[lumclass][ind])
+                else:
+                    specmatch = None
         else:
             specmatch = None
 
@@ -499,10 +549,7 @@ class TargetList(object):
             flux_bb = ((2*np.pi*const.h*const.c**2)/((lams)**5)
                        * (1/(np.exp(((const.h*const.c)/(const.k_B*teff*lams)))
                           - 1))).to(u.erg/u.s/u.cm**2/u.AA)  # Plank Law
-            vband = np.arange(3600, 5300, 5)  # bandpass to normalize over
-            Fv0 = (3.55*10**-9)*u.erg/u.s/u.cm**2/u.AA  # 0 mag flux in V
-            norm = Fv0/np.sum(flux_bb[[vband]])  # normalization constant
-            norm_fbb = flux_bb*norm  # normalized blackbody flux over lams
+            norm_fbb = renorm_V0(flux_bb) # normalized blackbody flux over lams
             F0 = self.spectrumIntegration(lam, BW, lams.value, norm_fbb.value)
             Fr = self.spectrumIntegration(refLam, refBW, lams.value, norm_fbb.value)
             print('Note: No spectral match found for star index ', sInd,
@@ -510,14 +557,30 @@ class TargetList(object):
 
         else:
             print('Spec match for star #', sInd, ' is ', specmatch)
-            # Open corresponding spectrum
-            with fits.open(os.path.join(self.specdatapath,
-                           self.specindex[specmatch])) as hdulist:
-                sdat = hdulist[1].data
+            if not useCK:
+                # Open corresponding spectrum
+                with fits.open(os.path.join(self.specdatapath,
+                               self.specindex[specmatch])) as hdulist:
+                    sdat = hdulist[1].data
+
+                wave, flux = sdat.WAVELENGTH, sdat.FLUX
+            else:
+                # values of self.ck_specindex are of the form ckp00_yyyyy[gxx],
+                #  and we want the field gxx in ckp00_yyyyy.fits
+                ck_info = self.ck_specindex[specmatch]
+                ck_info = re.split('\[|\]', ck_info)
+                ck_filename = ck_info[0] + '.fits'
+                ck_field = ck_info[1]
+                sdat = fits.getdata(ck_filename)
+                wave = sdat['WAVELENGTH'].copy()
+                flux = sdat[ck_field].copy()
+                flux = renorm_V0(flux * u.erg/u.s/u.cm**2/u.AA).value
+                print('Bandpass exceeds 2.5 microns; using Castelli and Kurucz 2004 '+
+                      'Atlas to calculate F0, mag.' )
 
             # Calculate area under spectrum for both bandpasses
-            F0 = self.spectrumIntegration(lam, BW, sdat.WAVELENGTH, sdat.FLUX)
-            Fr = self.spectrumIntegration(refLam, refBW, sdat.WAVELENGTH, sdat.FLUX)
+            F0 = self.spectrumIntegration(lam, BW, wave, flux)
+            Fr = self.spectrumIntegration(refLam, refBW, wave, flux)
 
         # Now calculate magnitude for specific bandpass
         mag = refMag - 2.5*np.log10(F0/Fr)
