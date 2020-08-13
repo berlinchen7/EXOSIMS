@@ -19,7 +19,7 @@ if sys.version_info[0] > 2:
 class OpticalSystem(object):
     """Optical System class template
     
-    This class contains all variables and methods necessary to perform
+    This class contains all variables and methods necessary to perform
     Optical System Definition Module calculations in exoplanet mission 
     simulation.
     
@@ -294,7 +294,7 @@ class OpticalSystem(object):
                 assert os.path.isfile(pth), "%s is not a valid file."%pth
                 # Check csv vs fits
                 ext = pth.split('.')[-1]
-                assert ext == 'fits' or ext == 'csv', f'{pth} must be a fits or csv file.'
+                assert ext == 'fits' or ext == 'csv', '%s must be a fits or csv file.'%pth
                 if ext == 'fits':
                     dat = fits.open(pth)[0].data
                 else:
@@ -446,7 +446,7 @@ class OpticalSystem(object):
             # populate system specifications to outspec
             for att in syst:
                 if att not in ['occ_trans', 'core_thruput', 'core_contrast',
-                        'core_mean_intensity', 'core_area', 'PSF']:
+                        'core_mean_intensity', 'core_area', 'PSF', 'F0']:
                     dat = syst[att]
                     self._outspec['starlightSuppressionSystems'][nsyst][att] \
                             = dat.value if isinstance(dat, u.Quantity) else dat
@@ -558,7 +558,7 @@ class OpticalSystem(object):
         # populate outspec with all OpticalSystem scalar attributes
         for att in self.__dict__:
             if att not in ['vprint', 'scienceInstruments', 
-                    'starlightSuppressionSystems', 'observingModes','_outspec']:
+                    'starlightSuppressionSystems', 'observingModes','_outspec', 'F0']:
                 dat = self.__dict__[att]
                 self._outspec[att] = dat.value if isinstance(dat, u.Quantity) else dat
 
@@ -606,7 +606,7 @@ class OpticalSystem(object):
             assert os.path.isfile(pth), "%s is not a valid file."%pth
             # Check for fits or csv file
             ext = pth.split('.')[-1]
-            assert ext == 'fits' or ext == 'csv', f'{pth} must be a fits or csv file.'
+            assert ext == 'fits' or ext == 'csv', '%s must be a fits or csv file.'%pth
             if ext == 'fits':
                 dat = fits.open(pth)[0].data
             else:
@@ -615,7 +615,7 @@ class OpticalSystem(object):
                 table_vals = np.genfromtxt(pth, delimiter=',', skip_header=1)
                 table_headers = np.genfromtxt(pth, delimiter=',', skip_footer=len(table_vals), dtype=str)
                 # Get the arcsecond and param values
-                arcsec_location = np.where(table_headers == 'r_arcsec')[0][0]
+                arcsec_location = np.where(table_headers == 'r_as')[0][0]
                 param_location = np.where(table_headers == param_name)[0][0]
                 dat = np.vstack([table_vals[:,arcsec_location],table_vals[:,param_location]]).T
             assert len(dat.shape) == 2 and 2 in dat.shape, \
@@ -907,7 +907,13 @@ class OpticalSystem(object):
         sInds = np.arange(TL.nStars)
         fZ = 0./u.arcsec**2
         fEZ = 0./u.arcsec**2
-        dMag = self.dMag0
+        # if scaleWAdMag - this may not be loaded until SurveySim instatiates
+        dMag = np.zeros((TL.nStars),)
+        for i,Lstar in enumerate(TL.L):
+            if (Lstar < 3.85) and (Lstar > 0. ):
+                dMag[i] = self.dMag0 + 2.5 * np.log10(Lstar)
+            else:
+                dMag[i] = self.dMag0
         WA = self.WA0
         
         # calculate minimum integration time
