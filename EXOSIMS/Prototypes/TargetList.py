@@ -463,14 +463,14 @@ class TargetList(object):
                      3450*u.nm: self.Lmag, 4750*u.nm: self.Mmag}
         refMags = band_dict[refLam]
         refMag = refMags[sInd]
-        print('Reference mag for star #', sInd, ' is ', refMag, ' in band ',
-              refLam)
+        #print('Reference mag for star #', sInd, ' is ', refMag, ' in band ',
+        #      refLam)
 
         # Construct renormalization function
-        def renorm_V0(f):
-            vband = np.arange(3600, 5300, 5)  # bandpass to normalize over
+        def renorm_V0(f, w):
             Fv0 = (3.55*10**-9)*u.erg/u.s/u.cm**2/u.AA  # 0 mag flux in V
-            norm = Fv0/np.sum(f[[vband]])  # normalization constant
+            vband = np.logical_and(w >= 4600*u.AA, w <= 6300*u.AA)
+            norm = Fv0/np.sum(f[vband]) # normalization constant
             return f*norm  # normalized blackbody flux over lams
 
         # Now match spectral type
@@ -522,7 +522,7 @@ class TargetList(object):
                                                    else self.romandict[spece[2]] - 1
                     lumclasse = self.rev_romandict[lumclasse]
                     assert lumclasse in ['I', 'III', 'V']
-                    lumclass = ck_specliste[:,2] == lumclasse
+                    lumclass = self.ck_specliste[:,2] == lumclasse
                     ind = np.argmin(np.abs(self.ck_spectypenum[lumclass] 
                                            - (self.specdict[spece[0]]*10+spece[1])))
                     specmatch = ''.join(self.ck_specliste[lumclass][ind])
@@ -549,14 +549,14 @@ class TargetList(object):
             flux_bb = ((2*np.pi*const.h*const.c**2)/((lams)**5)
                        * (1/(np.exp(((const.h*const.c)/(const.k_B*teff*lams)))
                           - 1))).to(u.erg/u.s/u.cm**2/u.AA)  # Plank Law
-            norm_fbb = renorm_V0(flux_bb) # normalized blackbody flux over lams
+            norm_fbb = renorm_V0(flux_bb, lams) # normalized blackbody flux over lams
             F0 = self.spectrumIntegration(lam, BW, lams.value, norm_fbb.value)
             Fr = self.spectrumIntegration(refLam, refBW, lams.value, norm_fbb.value)
             print('Note: No spectral match found for star index ', sInd,
                   ' using black body to calculate F0, mag.')
 
         else:
-            print('Spec match for star #', sInd, ' is ', specmatch)
+            #print('Spec match for star #', sInd, ' is ', specmatch)
             if not useCK:
                 # Open corresponding spectrum
                 with fits.open(os.path.join(self.specdatapath,
@@ -571,10 +571,10 @@ class TargetList(object):
                 ck_info = re.split('\[|\]', ck_info)
                 ck_filename = ck_info[0] + '.fits'
                 ck_field = ck_info[1]
-                sdat = fits.getdata(ck_filename)
+                sdat = fits.getdata(os.path.join(self.ck_specdatapath, ck_filename))
                 wave = sdat['WAVELENGTH'].copy()
                 flux = sdat[ck_field].copy()
-                flux = renorm_V0(flux * u.erg/u.s/u.cm**2/u.AA).value
+                flux = renorm_V0(flux * u.erg/u.s/u.cm**2/u.AA, wave * u.AA).value
                 print('Bandpass exceeds 2.5 microns; using Castelli and Kurucz 2004 '+
                       'Atlas to calculate F0, mag.' )
 
