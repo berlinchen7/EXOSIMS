@@ -27,6 +27,14 @@ except:
     import urllib3
 import pkg_resources
 import sys
+import warnings
+
+# set up environment for and then import pysynphot
+pysynphot_datapath = pkg_resources.resource_filename('EXOSIMS.TargetList','trds')
+assert os.path.isdir(pysynphot_datapath), 'Could not locate %s in TargetList directory.' %(pysynphot_datapath)
+os.environ['PYSYN_CDBS'] = pysynphot_datapath
+warnings.filterwarnings("ignore", message="Extinction files not found") # we don't use extinction files 
+import pysynphot
 
 class TargetList(object):
     """Target List class template
@@ -155,6 +163,7 @@ class TargetList(object):
             if att not in ['vprint','_outspec']:
                 dat = self.__dict__[att]
                 self._outspec[att] = dat.value if isinstance(dat, u.Quantity) else dat
+
         #set up stuff for spectral type conversion
         # Paths
         indexf =  pkg_resources.resource_filename('EXOSIMS.TargetList','pickles_index.pkl')
@@ -420,9 +429,8 @@ class TargetList(object):
         If spectral type is provided, tries to match based on luminosity class,
         then spectral type. Match to CK if the bandpass exceeds 2.5 microns;
         otherwise match to the Pickles Atlas. If no type, or no match, tries to 
-        match based on effective temperature. If neither Teff or SpT given, defaults to fit
-        based on Traub et al. 2016 (JATIS), which gives spectral flux density
-        of ~9.5e7 [ph/s/m2/nm] @ 500nm
+        match based on effective temperature. If no teff given, interpolates teff
+        using self.stellarTeff().
 
         Args:
             BW (float):
@@ -465,13 +473,6 @@ class TargetList(object):
         refMag = refMags[sInd]
         #print('Reference mag for star #', sInd, ' is ', refMag, ' in band ',
         #      refLam)
-
-        # Construct renormalization function
-        def renorm_V0(f, w):
-            Fv0 = (3.55*10**-9)*u.erg/u.s/u.cm**2/u.AA  # 0 mag flux in V
-            vband = np.logical_and(w >= 4600*u.AA, w <= 6300*u.AA)
-            norm = Fv0/np.sum(f[vband]) # normalization constant
-            return f*norm  # normalized blackbody flux over lams
 
         # Now match spectral type
         if spec is not None:
@@ -543,17 +544,17 @@ class TargetList(object):
             # pickles library (see notes on V band normalization here:
             # https://www.stsci.edu/hst/instrumentation/reference-data-for-
             # calibration-and-tools/astronomical-catalogs/pickles-atlas
-            # and source for V band 0 mag flux in appropriate units here:
-            # http://astro.pas.rochester.edu/~aquillen/ast142/costanti.html )
-            lams = np.arange(1000, 50000, 5)*u.AA
-            flux_bb = ((2*np.pi*const.h*const.c**2)/((lams)**5)
-                       * (1/(np.exp(((const.h*const.c)/(const.k_B*teff*lams)))
-                          - 1))).to(u.erg/u.s/u.cm**2/u.AA)  # Plank Law
-            norm_fbb = renorm_V0(flux_bb, lams) # normalized blackbody flux over lams
+            # pysynphot's default Vega spectrum 
+            # (fits file location: pysynphot.locations.VegaFile)
+            # is used for renormalization  
+            sp = pysynphot.Blackbody(teff.to(u.K).value)
+            sp = sp.renorm(0, 'vegamag', pysynphot.ObsBandpass('johnson,v'))
+            sp.convert('flam') # Convert flux units to flam (= u.erg/u.s/u.cm**2/u.AA)
+            lams, norm_fbb = sp.wave, sp.flux
             F0 = self.spectrumIntegration(lam, BW, lams.value, norm_fbb.value)
             Fr = self.spectrumIntegration(refLam, refBW, lams.value, norm_fbb.value)
-            print('Note: No spectral match found for star index ', sInd,
-                  ' using black body to calculate F0, mag.')
+            #print('Note: No spectral match found for star index ', sInd,
+            #      ' using black body to calculate F0, mag.')
 
         else:
             #print('Spec match for star #', sInd, ' is ', specmatch)
@@ -574,9 +575,12 @@ class TargetList(object):
                 sdat = fits.getdata(os.path.join(self.ck_specdatapath, ck_filename))
                 wave = sdat['WAVELENGTH'].copy()
                 flux = sdat[ck_field].copy()
-                flux = renorm_V0(flux * u.erg/u.s/u.cm**2/u.AA, wave * u.AA).value
-                print('Bandpass exceeds 2.5 microns; using Castelli and Kurucz 2004 '+
-                      'Atlas to calculate F0, mag.' )
+                sp = pysynphot.spectrum.ArraySourceSpectrum(wave=wave, flux=flux,\
+                        waveunits='angstrom',fluxunits='flam')
+                sp = sp.renorm(0, 'vegamag', pysynphot.ObsBandpass('johnson,v'))
+                wave, flux = sp.wave, sp.flux
+                #print('Bandpass exceeds 2.5 microns; using Castelli and Kurucz 2004 '+
+                #      'Atlas to calculate F0, mag.' )
 
             # Calculate area under spectrum for both bandpasses
             F0 = self.spectrumIntegration(lam, BW, wave, flux)
