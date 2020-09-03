@@ -417,7 +417,7 @@ class TargetList(object):
 
         return Flux
 
-    def F0(self, BW, lam, sInd, spec=None, teff=None):
+    def F0(self, BW, lam, sInd, spec=None, teff=None, usePickles=True):
         """
         This function calculates the spectral flux density and apparent
         magnitude in a given bandpass for a given spectral type.
@@ -427,10 +427,10 @@ class TargetList(object):
             archive.stsci.edu/hlsps/reference-atlases/cdbs/grid/ck04models/ckp00/
 
         If spectral type is provided, tries to match based on luminosity class,
-        then spectral type. Match to CK if the bandpass exceeds 2.5 microns;
-        otherwise match to the Pickles Atlas. If no type, or no match, tries to 
-        match based on effective temperature. If no teff given, interpolates teff
-        using self.stellarTeff().
+        then spectral type. Match to CK if usePickles=False OR if the bandpass 
+        exceeds 2.5 microns; otherwise match to the Pickles Atlas. If no type,
+        or no match, tries to match based on effective temperature. 
+        If no teff given, interpolates teff using self.stellarTeff().
 
         Args:
             BW (float):
@@ -443,6 +443,9 @@ class TargetList(object):
                 Should be something like G0V
             Teff (astropy Quantity):
                 Effective Stellar Temperature in units of K
+            usePickles (bool):
+                If True, then match to the Pickles Atlas if the given bandpass 
+                does not exceed 2.5 microns.
 
         Returns:
             tuple:
@@ -504,7 +507,7 @@ class TargetList(object):
             if lmax > 25000*u.AA or lmin > 25000*u.AA:
                 useCK = True
             else:
-                useCK = False
+                useCK = False or (not usePickles)
 
             if not useCK:
                 if spece is not None:
